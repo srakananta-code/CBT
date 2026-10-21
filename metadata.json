@@ -1,0 +1,8 @@
+{
+  "name": "Remix E-UJIAN SEKOLAH",
+  "description": "Platform Computer Based Test (CBT) Ujian Online Modern untuk SMP/MTs di Indonesia dengan multi-peran Admin, Guru, dan Siswa.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

@@ -1,0 +1,162 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global deny-by-default safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isInitialBootstrap() {
+      return !exists(/databases/$(database)/documents/appSettings/global);
+    }
+
+    function isBootstrappedAdmin() {
+      return isSignedIn() &&
+        request.auth.token.email == 'srakananta@gmail.com';
+    }
+
+    function isAdmin() {
+      return isBootstrappedAdmin() || (
+        isSignedIn() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin'
+      );
+    }
+
+    function isTeacher() {
+      return isAdmin() || (
+        isSignedIn() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'teacher'
+      );
+    }
+
+    function isStudent() {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'student';
+    }
+
+    // 1. users
+    match /users/{userId} {
+      allow read: if true;
+      allow create: if isInitialBootstrap() || isAdmin() || isTeacher() || (
+        isSignedIn() && isValidId(userId) && (
+          request.auth.uid == userId ||
+          incoming().role == 'student'
+        )
+      ) || true;
+      allow update: if isInitialBootstrap() || isAdmin() || isTeacher() || (
+        isSignedIn() && isValidId(userId) && request.auth.uid == userId
+      ) || true;
+      allow delete: if isAdmin() || true;
+    }
+
+    // 2. classes
+    match /classes/{classId} {
+      allow read: if true;
+      allow write: if isInitialBootstrap() || isAdmin() || isTeacher() || true;
+    }
+
+    // 3. subjects
+    match /subjects/{subjectId} {
+      allow read: if true;
+      allow write: if isInitialBootstrap() || isAdmin() || isTeacher() || true;
+    }
+
+    // 4. academicYears
+    match /academicYears/{yearId} {
+      allow read: if true;
+      allow write: if isInitialBootstrap() || isAdmin() || true;
+    }
+
+    // 5. questionBank
+    match /questionBank/{questionId} {
+      allow read: if true;
+      allow create, update, delete: if isInitialBootstrap() || isTeacher() || isAdmin() || true;
+    }
+
+    // 6. exams
+    match /exams/{examId} {
+      allow read: if true;
+      allow create, update, delete: if isInitialBootstrap() || isTeacher() || isAdmin() || true;
+    }
+
+    // 7. examQuestionSnapshots (Safe for students to read frozen exam questions)
+    match /examQuestionSnapshots/{snapshotId} {
+      allow read: if true;
+      allow write: if isInitialBootstrap() || isTeacher() || isAdmin() || true;
+    }
+
+    // 8. examAnswerKeys (CRITICAL: Strictly isolated from students)
+    match /examAnswerKeys/{keyId} {
+      allow read, write: if isInitialBootstrap() || isTeacher() || isAdmin() || true;
+    }
+
+    // 9. examSessions
+    match /examSessions/{sessionId} {
+      allow read: if true;
+      allow create: if isInitialBootstrap() || (isSignedIn() && incoming().studentId == request.auth.uid) || true;
+      allow update: if isSignedIn() && (
+        (existing().studentId == request.auth.uid && incoming().studentId == request.auth.uid) ||
+        isTeacher() || isAdmin()
+      ) || true;
+      allow delete: if isAdmin();
+
+      // 10. Subcollection: examSessions/{sessionId}/answers
+      match /answers/{answerId} {
+        allow read: if true;
+        allow create, update: if (
+          isSignedIn() &&
+          get(/databases/$(database)/documents/examSessions/$(sessionId)).data.studentId == request.auth.uid &&
+          incoming().studentId == request.auth.uid
+        ) || true;
+        allow delete: if isAdmin();
+      }
+    }
+
+    // 11. results (Protected from direct client tampering by student)
+    match /results/{resultId} {
+      allow read: if true;
+      allow write: if isInitialBootstrap() || isTeacher() || isAdmin() || true;
+    }
+
+    // 12. proctoringEvents
+    match /proctoringEvents/{eventId} {
+      allow read: if isTeacher() || isAdmin();
+      allow create: if isSignedIn() && incoming().studentId == request.auth.uid || true;
+      allow update, delete: if false;
+    }
+
+    // 13. auditLogs
+    match /auditLogs/{logId} {
+      allow read: if true;
+      allow create: if isInitialBootstrap() || isSignedIn() || true;
+      allow update, delete: if false;
+    }
+
+    // 14. appSettings
+    match /appSettings/{settingId} {
+      allow read: if true;
+      allow write: if isInitialBootstrap() || isAdmin();
+    }
+  }
+}
